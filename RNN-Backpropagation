@@ -31,50 +31,68 @@ def forward(inputs):
         ps[t] = softmax(ys[t])
 
     return hs, ps
-
-def compute_loss(ps, targets):
-    loss = 0
-    for t in range(len(targets)):
-        loss += -np.log(ps[t][targets[t], 0])
+def compute_loss(ps, target_last_step):
+    
+    last_step = len(ps) - 1
+    y_hat = ps[last_step]
+    
+    # Et = (y_hat - y)^2
+    loss = np.sum((y_hat - target_last_step) ** 2)
     return loss
-
-def backward(inputs, hs, ps, targets):
-    # Initialize gradients
+def backward(inputs, hs, ps, target_last_step):
+    N = len(inputs) - 1
+    
     dWx = np.zeros_like(Wx)
     dWh = np.zeros_like(Wh)
     dWy = np.zeros_like(Wy)
-
-    dh_next = np.zeros((hidden_size, 1))
-
-    # Backpropagation through time (BPTT)
-    for t in reversed(range(len(inputs))):
-        dy = np.copy(ps[t])
-        dy[targets[t]] -= 1
-
-        dWy += dy @ hs[t].T
-
-        dh = Wy.T @ dy + dh_next
-        dh_raw = (1 - hs[t] ** 2) * dh
-
-        dWx += dh_raw @ inputs[t].reshape(1, -1)
-        dWh += dh_raw @ hs[t-1].T
-
+    
+    # 1. First step - Adjusting Wy 
+    # يتم حسابها عند الخطوة الأخيرة فقط
+    y_hat = ps[N]
+    dy = y_hat - target_last_step # (y_hat - y)
+    
+    # dE/dWy = (y_hat - y) * h_N
+    dWy = dy @ hs[N].T 
+    
+    # تجهيز التدرج المبدئي للعودة بالزمن
+    dh_next = Wy.T @ dy 
+    
+    # 2 & 3. Second and Third steps - Adjusting Wh and Wx
+    # نعود بالزمن من الخطوة الأخيرة إلى البداية (BPTT)
+    for t in reversed(range(N + 1)):
+        x_t = inputs[t].reshape(-1, 1)
+        
+        # مشتقة دالة التنشيط tanh 
+        dh_raw = (1 - hs[t]**2) * dh_next
+        
+        # Adjusting Wx
+        dWx += dh_raw @ x_t.T
+        
+        # Adjusting Wh
+        if t > 0:
+            dWh += dh_raw @ hs[t-1].T
+        else:
+            dWh += dh_raw @ hs[-1].T # hs[-1] هو متجه الأصفار المبدئي
+            
+        # تمرير التدرج للخطوة الزمنية السابقة
         dh_next = Wh.T @ dh_raw
-
+        
     return dWx, dWh, dWy
-
 # training example
 for epoch in range(100):
-    # Generate random inputs and targets
     inputs = [np.random.randn(input_size) for _ in range(sequence_length)]
-    targets = np.random.randint(0, output_size, sequence_length)
+    
+  
+    target_last_step = np.random.rand(output_size, 1)
 
     # Forward pass
     hs, ps = forward(inputs)
-    loss = compute_loss(ps, targets)
+    
+  
+    loss = compute_loss(ps, target_last_step)
 
-    # Backward pass
-    dWx, dWh, dWy = backward(inputs, hs, ps, targets)
+    # Backward pass 
+    dWx, dWh, dWy = backward(inputs, hs, ps, target_last_step)
 
     # Update weights
     Wx -= learning_rate * dWx
